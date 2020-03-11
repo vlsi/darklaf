@@ -34,6 +34,8 @@ import java.awt.event.WindowEvent;
 import java.awt.event.WindowListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 public class MacOSTitlePane extends CustomTitlePane {
 
@@ -121,7 +123,12 @@ public class MacOSTitlePane extends CustomTitlePane {
     private void install() {
         determineColors();
         JRootPane rootPane = getRootPane();
-        decorationInformation = MacOSDecorationsUtil.installDecorations(rootPane);
+        Future<DecorationInformation> future = MacOSDecorationsUtil.installDecorations(rootPane);
+        try {
+            decorationInformation = future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }
         installListeners();
         if (!decorationInformation.titleVisible) {
             titleLabel = new JLabel();
@@ -149,7 +156,12 @@ public class MacOSTitlePane extends CustomTitlePane {
             titleLabel = null;
         }
         uninstallListeners();
-        MacOSDecorationsUtil.uninstallDecorations(decorationInformation);
+        Future<Void> future = MacOSDecorationsUtil.uninstallDecorations(decorationInformation);
+        try {
+            future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }
         decorationInformation = null;
     }
 

@@ -49,13 +49,13 @@ Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_getComponentPoi
     return ptr;
 }
 
-JNIEXPORT jlong JNICALL
+JNIEXPORT void JNICALL
 Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_retainWindow(JNIEnv *env, jclass obj, jlong hwnd) {
      NSWindow *nsWindow = OBJC(hwnd);
-       [nsWindow retain];
+     [nsWindow retain];
 }
 
-JNIEXPORT jlong JNICALL
+JNIEXPORT void JNICALL
 Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_releaseWindow(JNIEnv *env, jclass obj, jlong hwnd) {
        NSWindow *nsWindow = OBJC(hwnd);
        //Ensure any queued operation on nsWindow is finished first.
@@ -130,4 +130,17 @@ Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_uninstallDecora
         nsWindow.titlebarAppearsTransparent = false;
         [nsWindow contentView].needsDisplay = true;
     });
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_queueNotify(JNIEnv *env, jclass clazz, jobject callback) {
+    jclass runnableClass = env->FindClass("java/lang/Runnable");
+    jobject cb = env->NewGlobalRef(callback);
+    if (env->IsInstanceOf(callback, runnableClass)) {
+        jmethodID runMethodId = env->GetMethodID(runnableClass, "run","()V");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            env->CallVoidMethod(cb, runMethodId);
+            env->DeleteGlobalRef(cb);
+        });
+    }
 }

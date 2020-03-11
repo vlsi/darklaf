@@ -28,19 +28,28 @@ import com.github.weisj.darklaf.util.SystemInfo;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MacOSDecorationsUtil {
 
+    private static final Object installLock = new Object();
+    private static final Object uninstallLock = new Object();
+    private static final AtomicBoolean installed = new AtomicBoolean(false);
+    private static final AtomicBoolean uninstalled = new AtomicBoolean(false);
     private static final String FULL_WINDOW_CONTENT_KEY = "apple.awt.fullWindowContent";
     private static final String TRANSPARENT_TITLE_BAR_KEY = "apple.awt.transparentTitleBar";
 
-    protected static DecorationInformation installDecorations(final JRootPane rootPane) {
+    protected static Future<DecorationInformation> installDecorations(final JRootPane rootPane) {
         if (rootPane == null) return null;
         Window window = SwingUtilities.getWindowAncestor(rootPane);
         long windowHandle = JNIDecorationsMacOS.getComponentPointer(window);
         if (windowHandle == 0) {
-            return new DecorationInformation(0, false, false,
-                                             false, rootPane, false, 0, 0);
+            DecorationInformation information = new DecorationInformation(0, false, false,
+                                                                          false, rootPane, false, 0, 0);
+            return CompletableFuture.completedFuture(information);
         }
         JNIDecorationsMacOS.retainWindow(windowHandle);
         boolean fullWindowContent = isFullWindowContentEnabled(rootPane);
@@ -61,12 +70,15 @@ public class MacOSDecorationsUtil {
             boolean isDarkTheme = UIManager.getBoolean("Theme.dark");
             JNIDecorationsMacOS.setDarkTheme(windowHandle, isDarkTheme);
         }
-        return new DecorationInformation(windowHandle, fullWindowContent, transparentTitleBar,
-                                         jniInstall, rootPane, titleVisible, titleBarHeight, titleFontSize);
+        DecorationInformation information = new DecorationInformation(windowHandle, fullWindowContent,
+                                                                      transparentTitleBar, jniInstall,
+                                                                      rootPane, titleVisible,
+                                                                      titleBarHeight, titleFontSize);
+        return complete(information, installLock, installed);
     }
 
-    protected static void uninstallDecorations(final DecorationInformation information) {
-        if (information == null || information.windowHandle == 0) return;
+    protected static Future<Void> uninstallDecorations(final DecorationInformation information) {
+        if (information == null || information.windowHandle == 0) return CompletableFuture.completedFuture(null);
         if (information.jniInstalled) {
             JNIDecorationsMacOS.uninstallDecorations(information.windowHandle);
         } else {
@@ -75,6 +87,7 @@ public class MacOSDecorationsUtil {
         }
         JNIDecorationsMacOS.setTitleEnabled(information.windowHandle, true);
         JNIDecorationsMacOS.releaseWindow(information.windowHandle);
+        return complete(null, uninstallLock, uninstalled);
     }
 
     private static boolean isFullWindowContentEnabled(final JRootPane rootPane) {
@@ -85,12 +98,46 @@ public class MacOSDecorationsUtil {
         return Boolean.TRUE.equals(rootPane.getClientProperty(TRANSPARENT_TITLE_BAR_KEY));
     }
 
-    private static void setFullWindowContentEnabled(final JRootPane rootPane,
-                                                    final boolean enabled) {
+    private static void setFullWindowContentEnabled(final JRootPane rootPane, final boolean enabled) {
         rootPane.putClientProperty(FULL_WINDOW_CONTENT_KEY, enabled);
     }
 
     private static void setTransparentTitleBarEnabled(final JRootPane rootPane, final boolean enabled) {
         rootPane.putClientProperty(TRANSPARENT_TITLE_BAR_KEY, enabled);
+    }
+
+    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
+    private static <T> Future<T> complete(final T value, final Object lock, final AtomicBoolean flag) {
+        requestCallBack(lock, flag);
+        synchronized (flag) {
+            if (flag.get()) {
+                return CompletableFuture.completedFuture(value);
+            }
+            return new InstallTask<>(lock, value);
+        }
+    }
+
+    private static void requestCallBack(final Object lock, final AtomicBoolean flag) {
+        flag.set(false);
+        JNIDecorationsMacOS.queueNotify(() -> {
+            synchronized (flag) {
+                flag.set(true);
+            }
+            synchronized (lock) {
+                lock.notify();
+            }
+        });
+    }
+
+    private static class InstallTask<T> extends FutureTask<T> {
+
+        public InstallTask(final Object lock, final T information) {
+            super(() -> {
+                synchronized (lock) {
+                    lock.wait();
+                    return information;
+                }
+            });
+        }
     }
 }
