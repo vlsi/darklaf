@@ -36,6 +36,8 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class MacOSTitlePane extends CustomTitlePane {
 
@@ -125,9 +127,12 @@ public class MacOSTitlePane extends CustomTitlePane {
         JRootPane rootPane = getRootPane();
         Future<DecorationInformation> future = MacOSDecorationsUtil.installDecorations(rootPane);
         try {
-            decorationInformation = future.get();
-        } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
+            decorationInformation = future.get(15, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (ExecutionException | TimeoutException e) {
+            throw new RuntimeException("Unable to install decorations for window " + window, e);
         }
         installListeners();
         if (!decorationInformation.titleVisible) {

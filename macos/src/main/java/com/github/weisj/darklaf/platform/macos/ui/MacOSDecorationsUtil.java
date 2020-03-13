@@ -29,20 +29,13 @@ import com.github.weisj.darklaf.util.SystemInfo;
 import javax.swing.*;
 import java.awt.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MacOSDecorationsUtil {
 
-    private static final Object installLock = new Object();
-    private static final Object uninstallLock = new Object();
-    private static final AtomicBoolean installed = new AtomicBoolean(false);
-    private static final AtomicBoolean uninstalled = new AtomicBoolean(false);
     private static final String FULL_WINDOW_CONTENT_KEY = "apple.awt.fullWindowContent";
     private static final String TRANSPARENT_TITLE_BAR_KEY = "apple.awt.transparentTitleBar";
 
-    protected static Future<DecorationInformation> installDecorations(final JRootPane rootPane) {
+    protected static CompletableFuture<DecorationInformation> installDecorations(final JRootPane rootPane) {
         if (rootPane == null) return null;
         Window window = SwingUtilities.getWindowAncestor(rootPane);
         long windowHandle = JNIDecorationsMacOS.getComponentPointer(window);
@@ -74,10 +67,10 @@ public class MacOSDecorationsUtil {
                                                                       transparentTitleBar, jniInstall,
                                                                       rootPane, titleVisible,
                                                                       titleBarHeight, titleFontSize);
-        return complete(information, installLock, installed);
+        return processCocoaEvents().thenApply((v) -> information);
     }
 
-    protected static Future<Void> uninstallDecorations(final DecorationInformation information) {
+    protected static CompletableFuture<Void> uninstallDecorations(final DecorationInformation information) {
         if (information == null || information.windowHandle == 0) return CompletableFuture.completedFuture(null);
         if (information.jniInstalled) {
             JNIDecorationsMacOS.uninstallDecorations(information.windowHandle);
@@ -87,7 +80,7 @@ public class MacOSDecorationsUtil {
         }
         JNIDecorationsMacOS.setTitleEnabled(information.windowHandle, true);
         JNIDecorationsMacOS.releaseWindow(information.windowHandle);
-        return complete(null, uninstallLock, uninstalled);
+        return processCocoaEvents();
     }
 
     private static boolean isFullWindowContentEnabled(final JRootPane rootPane) {
@@ -106,38 +99,9 @@ public class MacOSDecorationsUtil {
         rootPane.putClientProperty(TRANSPARENT_TITLE_BAR_KEY, enabled);
     }
 
-    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
-    private static <T> Future<T> complete(final T value, final Object lock, final AtomicBoolean flag) {
-        requestCallBack(lock, flag);
-        synchronized (flag) {
-            if (flag.get()) {
-                return CompletableFuture.completedFuture(value);
-            }
-            return new InstallTask<>(lock, value);
-        }
-    }
-
-    private static void requestCallBack(final Object lock, final AtomicBoolean flag) {
-        flag.set(false);
-        JNIDecorationsMacOS.queueNotify(() -> {
-            synchronized (flag) {
-                flag.set(true);
-            }
-            synchronized (lock) {
-                lock.notify();
-            }
-        });
-    }
-
-    private static class InstallTask<T> extends FutureTask<T> {
-
-        public InstallTask(final Object lock, final T information) {
-            super(() -> {
-                synchronized (lock) {
-                    lock.wait();
-                    return information;
-                }
-            });
-        }
+    private static CompletableFuture<Void> processCocoaEvents() {
+        CompletableFuture<Void> res = new CompletableFuture<>();
+        JNIDecorationsMacOS.queueNotify(() -> res.complete(null));
+        return res;
     }
 }

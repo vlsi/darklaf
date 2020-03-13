@@ -134,13 +134,14 @@ Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_uninstallDecora
 
 JNIEXPORT void JNICALL
 Java_com_github_weisj_darklaf_platform_macos_JNIDecorationsMacOS_queueNotify(JNIEnv *env, jclass clazz, jobject callback) {
-    jclass runnableClass = env->FindClass("java/lang/Runnable");
+    jclass runnableClass = env->GetObjectClass(callback);
+    jmethodID runMethodId = env->GetMethodID(runnableClass, "run", "()V");
+    // Need to keep callback on the heap otherwise it becomes eligible for the garbage collection
+    // right after finish of the JNI method
+    // However, we call the callback in the async thread.
     jobject cb = env->NewGlobalRef(callback);
-    if (env->IsInstanceOf(callback, runnableClass)) {
-        jmethodID runMethodId = env->GetMethodID(runnableClass, "run","()V");
-        dispatch_async(dispatch_get_main_queue(), ^{
-            env->CallVoidMethod(cb, runMethodId);
-            env->DeleteGlobalRef(cb);
-        });
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        env->CallVoidMethod(cb, runMethodId);
+        env->DeleteGlobalRef(cb);
+    });
 }
